@@ -1,0 +1,217 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+using ZedGraph;
+using System.IO.Ports;
+using System.IO;
+using System.Xml;
+
+namespace mo_rong_ltdknc_2
+{
+    public partial class Form1 : Form
+    {
+        string sdata = String.Empty;
+        string stime = String.Empty;
+        string uk = String.Empty;
+        string kp = String.Empty;
+        string ki = String.Empty;
+        string kd = String.Empty;
+        int mode = 0;
+        double data = 0;
+        double time = 0;
+        double setpoint = 0;
+
+        public Form1()
+        {
+            InitializeComponent();
+            string[] baud = { "1200", "2400", "4800", "9600" };
+            cBox_baud.Items.AddRange(baud);
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            cBox_COM.DataSource = SerialPort.GetPortNames();
+            cBox_baud.SelectedIndex = 3;
+            GraphPane mypane = zedGraphControl1.GraphPane;
+            mypane.Title.Text = "Do thi nhiet do theo thoi gian";
+            mypane.XAxis.Title.Text = "Thoi gian (s)";
+            mypane.YAxis.Title.Text = "Nhiet do (oC)";
+            RollingPointPairList list1 = new RollingPointPairList(60000);
+            RollingPointPairList list2 = new RollingPointPairList(60000);
+            LineItem curve1 = mypane.AddCurve("Nhiet do", list1, Color.Red, SymbolType.None);
+            LineItem curve2 = mypane.AddCurve("Setpoint", list2, Color.Blue, SymbolType.None);
+            mypane.XAxis.Scale.Min = 0;
+            mypane.XAxis.Scale.Max = 30;
+            mypane.XAxis.Scale.MinorStep = 1;
+            mypane.XAxis.Scale.MajorStep = 5;
+            mypane.YAxis.Scale.Min = 0;
+            mypane.YAxis.Scale.Max = 110;
+
+            mypane.AxisChange();
+        }
+
+        private void bt_ket_noi_Click(object sender, EventArgs e)
+        {
+            if(!serialPort1.IsOpen)
+            {
+                serialPort1.PortName = cBox_COM.Text;
+                serialPort1.BaudRate = Convert.ToInt32(cBox_baud.Text);
+                serialPort1.Open();
+                trang_thai.Value = 100;
+                bt_ket_noi.Text = "Ngat ket noi";
+            }else
+            {
+                serialPort1.Close();
+                trang_thai.Value = 0;
+                bt_ket_noi.Text = "Ket noi";
+            }
+        }
+
+        private void serialPort1_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            try
+            {
+                string[] arrlist = serialPort1.ReadLine().Split('|');
+                if (arrlist[0] == "abcxyz")
+                {
+                    kp = arrlist[1];
+                    ki = arrlist[2];
+                    kd = arrlist[3];
+                }
+                else
+                {
+                    uk = arrlist[0];
+                    sdata = arrlist[1];
+                    stime = arrlist[2];
+                    double.TryParse(stime, out time);
+                    double.TryParse(sdata, out data);
+                    time = time / 1000;
+                }
+            }
+            catch
+            {
+                return;
+            }
+        }
+
+        private void timer1_Tick(object sender, EventArgs e)
+        {
+            if(!serialPort1.IsOpen)
+            {
+                bt_ket_noi.Text = "Ket noi";
+                trang_thai.Value = 0;
+            }
+            else
+            {
+                bt_ket_noi.Text = "Ngat ket noi";
+                trang_thai.Value = 100;
+            }
+        }
+
+        private void draw()
+        {
+            if (zedGraphControl1.GraphPane.CurveList.Count <= 0)
+                return;
+            LineItem curve1 = zedGraphControl1.GraphPane.CurveList[0] as LineItem;
+            LineItem curve2 = zedGraphControl1.GraphPane.CurveList[1] as LineItem;
+            if (curve1 == null)
+                return;
+            if (curve2 == null)
+                return;
+            IPointListEdit list1 = curve1.Points as IPointListEdit;
+            IPointListEdit list2 = curve2.Points as IPointListEdit;
+            if (list1 == null)
+                return;
+            if (list2 == null)
+                return;
+            list1.Add(time, data);
+            list2.Add(time, setpoint);
+            Scale xScale = zedGraphControl1.GraphPane.XAxis.Scale;
+            if(time>xScale.Max-xScale.MajorStep)
+            {
+                xScale.Max = time + xScale.MajorStep;
+            }
+            zedGraphControl1.AxisChange();
+            zedGraphControl1.Validate();
+            zedGraphControl1.Refresh();
+        }
+
+        private void bt_send_param_Click(object sender, EventArgs e)
+        {
+            if(tBox_setpoint.Text==String.Empty)
+            {
+                MessageBox.Show("Ban hay nhap setpoint vao", "Setpoint", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            else
+            {
+                double.TryParse(tBox_setpoint.Text, out setpoint);
+                switch (mode)
+                {
+                    case 0:
+                        serialPort1.WriteLine("0");
+                        break;
+                    case 1:
+                        serialPort1.WriteLine("1");
+                        break;
+                    case 2:
+                        if (tBox_Kp_PID.Text == String.Empty || tBox_Ki_PID.Text == String.Empty || tBox_Kd_PID.Text == String.Empty)
+                        {
+                            MessageBox.Show("Nhap thong so bo dieu khien vao", "Thong so", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+                        serialPort1.WriteLine("2");       
+                        break;
+                }
+
+            }
+        }
+
+        private void rbt_on_off_CheckedChanged(object sender, EventArgs e)
+        {
+            mode = 1;
+            rbt_auto_tuning.Checked = false;
+            rbt_PID.Checked = false;
+            gBox_AT.Enabled = false;
+            gBox_PID.Enabled = false;
+        }
+
+        private void rbt_auto_tuning_CheckedChanged(object sender, EventArgs e)
+        {
+            mode = 0;
+            rbt_on_off.Checked = false;
+            rbt_PID.Checked = false;
+            gBox_PID.Enabled = false;
+            gBox_AT.Enabled = true;
+        }
+
+        private void rbt_PID_CheckedChanged(object sender, EventArgs e)
+        {
+            mode = 2;
+            rbt_on_off.Checked = false;
+            rbt_auto_tuning.Checked = false;
+            gBox_AT.Enabled = false;
+            gBox_PID.Enabled = true;
+        }
+
+        private void timer2_Tick(object sender, EventArgs e)
+        {
+            tBox_nhiet_do.Text = sdata;
+            tBox_uk.Text = uk;
+            tBox_Kp_AT.Text = kp;
+            tBox_Ki_AT.Text = ki;
+            tBox_Kd_AT.Text = kd;
+            draw();
+        }
+
+        private void bt_Start_Click(object sender, EventArgs e)
+        {
+            serialPort1.WriteLine("3");
+            timer2.Enabled = true;
+        }
+    }
+}
